@@ -8,23 +8,38 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1. Download source
+      # 1. Download & extract safely
       - name: Download source
         shell: pwsh
         run: |
           curl -L -o src.zip "https://bitbucket.org/surflab/polyhedral_splines/get/master.zip"
-          Expand-Archive src.zip -DestinationPath extracted
-          $dir = Get-ChildItem extracted -Directory | Select-Object -First 1
-          Rename-Item $dir.FullName poly_src
 
-      # 2. Debug structure (IMPORTANT)
-      - name: Show repo structure
+          Expand-Archive src.zip -DestinationPath extracted
+
+          Write-Host "Extracted folders:"
+          Get-ChildItem extracted
+
+          # Find actual root folder
+          $root = Get-ChildItem extracted -Directory | Select-Object -First 1
+
+          if (-not $root) {
+            Write-Error "Extraction failed"
+            exit 1
+          }
+
+          Move-Item $root.FullName poly_src
+
+          Write-Host "poly_src created:"
+          Get-ChildItem poly_src
+
+      # 2. Verify structure
+      - name: Debug structure
         shell: pwsh
         run: |
-          Write-Host "Listing structure:"
-          Get-ChildItem -Recurse poly_src/src
+          Write-Host "Listing poly_src:"
+          Get-ChildItem -Recurse poly_src
 
-      # 3. Add CLI entry (SAFE includes)
+      # 3. Add CLI entry
       - name: Add CLI entry
         shell: pwsh
         run: |
@@ -55,16 +70,15 @@ jobs:
           Add-Content poly_src/src/cli/main.cpp '    return 0;'
           Add-Content poly_src/src/cli/main.cpp '}'
 
-      # 4. Patch CMake (AUTO INCLUDE FIX)
+      # 4. Patch CMake (dynamic include fix)
       - name: Patch CMake
         shell: pwsh
         run: |
-          # Find actual header locations dynamically
           $proc = Get-ChildItem poly_src -Recurse -Filter "ProcessMesh.h" | Select-Object -First 1
           $igs  = Get-ChildItem poly_src -Recurse -Filter "IGSWriter.h" | Select-Object -First 1
 
           if (-not $proc -or -not $igs) {
-            Write-Error "Required headers not found"
+            Write-Error "Headers not found"
             exit 1
           }
 
