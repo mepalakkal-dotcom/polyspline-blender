@@ -1,0 +1,86 @@
+name: Build PolySplines CLI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Download source
+        shell: pwsh
+        run: |
+          curl -L -o src.zip "https://bitbucket.org/surflab/polyhedral_splines/get/master.zip"
+          Expand-Archive src.zip -DestinationPath extracted
+          $dir = Get-ChildItem extracted -Directory | Select-Object -First 1
+          Rename-Item $dir.FullName poly_src
+
+      - name: Add CLI entry
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path poly_src/src/cli | Out-Null
+
+          @"
+#include <iostream>
+#include "ProcessMesh.h"
+#include "PatchConsumer/IGSWriter.h"
+
+int main(int argc, char** argv)
+{
+    if (argc < 3)
+    {
+        std::cout << "Usage: polyspline_cli input.obj output.igs\n";
+        return 1;
+    }
+
+    ProcessMesh proc;
+    proc.loadMesh(argv[1]);
+    proc.buildPNS();
+
+    auto patches = proc.getPatches();
+
+    IGSWriter writer;
+    writer.write(argv[2], patches);
+
+    std::cout << "Done\n";
+    return 0;
+}
+"@ | Set-Content poly_src/src/cli/main.cpp
+
+      - name: Patch CMake
+        shell: pwsh
+        run: |
+          Add-Content poly_src/CMakeLists.txt @"
+
+add_executable(polyspline_cli src/cli/main.cpp)
+target_link_libraries(polyspline_cli pns_core)
+"@
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cd poly_src
+          mkdir build
+          cd build
+          cmake .. -A x64
+          cmake --build . --config Release
+
+      - name: Collect EXE
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem poly_src/build -Recurse -Filter "polyspline_cli.exe" | Select-Object -First 1
+
+          if (-not $exe) {
+            Write-Error "EXE not found"
+            exit 1
+          }
+
+          mkdir output
+          Copy-Item $exe.FullName output/
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: polyspline_cli
+          path: output/polyspline_cli.exe
