@@ -21,7 +21,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path poly_src/src/cli | Out-Null
 
-          @"
+          $code = @"
 #include <iostream>
 #include "ProcessMesh.h"
 #include "PatchConsumer/IGSWriter.h"
@@ -46,16 +46,18 @@ int main(int argc, char** argv)
     std::cout << "Done\n";
     return 0;
 }
-"@ | Set-Content poly_src/src/cli/main.cpp
+"@
+
+          $code | Set-Content poly_src/src/cli/main.cpp
 
       - name: Patch CMake
         shell: pwsh
         run: |
-          Add-Content poly_src/CMakeLists.txt @"
+          Add-Content poly_src/CMakeLists.txt '
 
 add_executable(polyspline_cli src/cli/main.cpp)
 target_link_libraries(polyspline_cli pns_core)
-"@
+'
 
       - name: Build
         shell: pwsh
@@ -76,7 +78,7 @@ target_link_libraries(polyspline_cli pns_core)
             exit 1
           }
 
-          mkdir output
+          New-Item -ItemType Directory -Force -Path output | Out-Null
           Copy-Item $exe.FullName output/
 
       - name: Upload
