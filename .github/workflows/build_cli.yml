@@ -8,7 +8,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1. Download source
+      # 1. Download PolySplines source
       - name: Download source
         shell: pwsh
         run: |
@@ -17,15 +17,15 @@ jobs:
           $dir = Get-ChildItem extracted -Directory | Select-Object -First 1
           Rename-Item $dir.FullName poly_src
 
-      # 2. Add CLI entry
+      # 2. Add CLI entry point
       - name: Add CLI entry
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path poly_src/src/cli | Out-Null
 
           Set-Content poly_src/src/cli/main.cpp '#include <iostream>'
-          Add-Content poly_src/src/cli/main.cpp '#include "api/ProcessMesh.h"'
-          Add-Content poly_src/src/cli/main.cpp '#include "PatchConsumer/IGSWriter.h"'
+          Add-Content poly_src/src/cli/main.cpp '#include "ProcessMesh.h"'
+          Add-Content poly_src/src/cli/main.cpp '#include "IGSWriter.h"'
           Add-Content poly_src/src/cli/main.cpp ''
           Add-Content poly_src/src/cli/main.cpp 'int main(int argc, char** argv)'
           Add-Content poly_src/src/cli/main.cpp '{'
@@ -48,15 +48,17 @@ jobs:
           Add-Content poly_src/src/cli/main.cpp '    return 0;'
           Add-Content poly_src/src/cli/main.cpp '}'
 
-      # 3. Patch CMake (VERY IMPORTANT)
+      # 3. Patch CMake (FIXED INCLUDE PATHS)
       - name: Patch CMake
         shell: pwsh
         run: |
           Add-Content poly_src/CMakeLists.txt 'include_directories(${CMAKE_SOURCE_DIR}/src)'
+          Add-Content poly_src/CMakeLists.txt 'include_directories(${CMAKE_SOURCE_DIR}/src/api)'
+          Add-Content poly_src/CMakeLists.txt 'include_directories(${CMAKE_SOURCE_DIR}/src/PatchConsumer)'
           Add-Content poly_src/CMakeLists.txt 'add_executable(polyspline_cli src/cli/main.cpp)'
           Add-Content poly_src/CMakeLists.txt 'target_link_libraries(polyspline_cli pns_core)'
 
-      # 4. Build
+      # 4. Build CLI
       - name: Build
         shell: pwsh
         run: |
@@ -80,7 +82,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path output | Out-Null
           Copy-Item $exe.FullName output/
 
-      # 6. Upload
+      # 6. Upload EXE
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
