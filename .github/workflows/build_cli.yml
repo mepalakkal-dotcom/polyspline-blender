@@ -17,15 +17,22 @@ jobs:
           $dir = Get-ChildItem extracted -Directory | Select-Object -First 1
           Rename-Item $dir.FullName poly_src
 
-      # 2. Add CLI entry
+      # 2. Debug structure (IMPORTANT)
+      - name: Show repo structure
+        shell: pwsh
+        run: |
+          Write-Host "Listing structure:"
+          Get-ChildItem -Recurse poly_src/src
+
+      # 3. Add CLI entry (SAFE includes)
       - name: Add CLI entry
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path poly_src/src/cli | Out-Null
 
           Set-Content poly_src/src/cli/main.cpp '#include <iostream>'
-          Add-Content poly_src/src/cli/main.cpp '#include "api/ProcessMesh.h"'
-          Add-Content poly_src/src/cli/main.cpp '#include "PatchConsumer/IGSWriter.h"'
+          Add-Content poly_src/src/cli/main.cpp '#include "ProcessMesh.h"'
+          Add-Content poly_src/src/cli/main.cpp '#include "IGSWriter.h"'
           Add-Content poly_src/src/cli/main.cpp ''
           Add-Content poly_src/src/cli/main.cpp 'int main(int argc, char** argv)'
           Add-Content poly_src/src/cli/main.cpp '{'
@@ -48,15 +55,30 @@ jobs:
           Add-Content poly_src/src/cli/main.cpp '    return 0;'
           Add-Content poly_src/src/cli/main.cpp '}'
 
-      # 3. Patch CMake (FINAL FIX)
+      # 4. Patch CMake (AUTO INCLUDE FIX)
       - name: Patch CMake
         shell: pwsh
         run: |
-          Add-Content poly_src/CMakeLists.txt 'add_executable(polyspline_cli src/cli/main.cpp)'
-          Add-Content poly_src/CMakeLists.txt 'target_include_directories(polyspline_cli PRIVATE ${CMAKE_SOURCE_DIR}/src)'
-          Add-Content poly_src/CMakeLists.txt 'target_link_libraries(polyspline_cli pns_core)'
+          # Find actual header locations dynamically
+          $proc = Get-ChildItem poly_src -Recurse -Filter "ProcessMesh.h" | Select-Object -First 1
+          $igs  = Get-ChildItem poly_src -Recurse -Filter "IGSWriter.h" | Select-Object -First 1
 
-      # 4. Build
+          if (-not $proc -or -not $igs) {
+            Write-Error "Required headers not found"
+            exit 1
+          }
+
+          $procDir = Split-Path $proc.FullName
+          $igsDir  = Split-Path $igs.FullName
+
+          Write-Host "ProcessMesh.h in: $procDir"
+          Write-Host "IGSWriter.h in: $igsDir"
+
+          Add-Content poly_src/CMakeLists.txt "add_executable(polyspline_cli src/cli/main.cpp)"
+          Add-Content poly_src/CMakeLists.txt "target_include_directories(polyspline_cli PRIVATE `"$procDir`" `"$igsDir`")"
+          Add-Content poly_src/CMakeLists.txt "target_link_libraries(polyspline_cli pns_core)"
+
+      # 5. Build
       - name: Build
         shell: pwsh
         run: |
@@ -66,7 +88,7 @@ jobs:
           cmake .. -A x64
           cmake --build . --config Release
 
-      # 5. Collect EXE
+      # 6. Collect EXE
       - name: Collect EXE
         shell: pwsh
         run: |
@@ -80,7 +102,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path output | Out-Null
           Copy-Item $exe.FullName output/
 
-      # 6. Upload
+      # 7. Upload
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
