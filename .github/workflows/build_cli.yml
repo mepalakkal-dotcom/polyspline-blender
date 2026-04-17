@@ -1,4 +1,4 @@
-name: Build PolySplines CLI
+name: Build Standalone PolyhedralSplines.exe
 
 on:
   workflow_dispatch:
@@ -8,71 +8,81 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1. Download source
-      - name: Download source
+      - name: Download SurfLab source
         shell: pwsh
         run: |
-          curl -L -o src.zip "https://bitbucket.org/surflab/polyhedral_splines/get/master.zip"
-          Expand-Archive src.zip -DestinationPath extracted
-          $root = Get-ChildItem extracted -Directory | Select-Object -First 1
-          Move-Item $root.FullName poly_src
+          curl -L -o source.zip "https://bitbucket.org/surflab/polyhedral_splines/get/master.zip"
+          Expand-Archive source.zip -DestinationPath .
+          $folder = Get-ChildItem -Directory | Where-Object { $_.Name -like "surflab-*" } | Select-Object -First 1
+          Rename-Item $folder.FullName "source"
 
-      # 2. Show structure (important)
-      - name: Debug structure
+      - name: Patch CMakeLists — static runtime + legacy stdio
         shell: pwsh
         run: |
-          Get-ChildItem -Recurse poly_src
+          $path = "source/CMakeLists.txt"
+          $content = Get-Content $path -Raw
 
-      # 3. Create CLI main.cpp (minimal)
-      - name: Create CLI
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path poly_src/src/cli | Out-Null
-
-          Set-Content poly_src/src/cli/main.cpp '#include <iostream>'
-          Add-Content poly_src/src/cli/main.cpp ''
-          Add-Content poly_src/src/cli/main.cpp 'int main()'
-          Add-Content poly_src/src/cli/main.cpp '{'
-          Add-Content poly_src/src/cli/main.cpp '    std::cout << "PolySplines CLI placeholder\n";'
-          Add-Content poly_src/src/cli/main.cpp '    return 0;'
-          Add-Content poly_src/src/cli/main.cpp '}'
-
-      # 4. Patch CMake (BUILD EVERYTHING)
-      - name: Patch CMake
-        shell: pwsh
-        run: |
-          Add-Content poly_src/CMakeLists.txt "
-file(GLOB_RECURSE ALL_SRC src/*.cpp)
-add_executable(polyspline_cli \${ALL_SRC})
-"
-
-      # 5. Build
-      - name: Build
-        shell: pwsh
-        run: |
-          cd poly_src
-          mkdir build
-          cd build
-          cmake .. -A x64
-          cmake --build . --config Release
-
-      # 6. Collect EXE
-      - name: Collect EXE
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem poly_src/build -Recurse -Filter "polyspline_cli.exe" | Select-Object -First 1
-
-          if (-not $exe) {
-            Write-Error "EXE not found"
+          # 1. Propagate static runtime to OpenMesh sub-build
+          $needle  = "-DBUILD_SHARED_LIBS=`${OPENMESH_BUILD_SHARED}"
+          $replace = "-DBUILD_SHARED_LIBS=`${OPENMESH_BUILD_SHARED}`r`n               -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+          if ($content -notmatch [regex]::Escape($needle)) {
+            Write-Error "Patch 1 failed: needle not found"
             exit 1
           }
+          $content = $content.Replace($needle, $replace)
 
-          mkdir output
-          Copy-Item $exe.FullName output/
+          # 2. Append legacy_stdio_definitions to the main target link flags.
+          # feof / rewind became inline in modern Windows SDKs; OpenMesh was built
+          # before that change, so the linker needs legacy_stdio_definitions.lib
+          # to resolve them.
+          $append = @"
 
-      # 7. Upload
-      - name: Upload
+
+          # Added by GitHub Actions patch: resolve legacy stdio symbols
+          # (feof, rewind) referenced by older OpenMesh builds.
+          if(MSVC)
+              if(TARGET PolyhedralSplines)
+                  target_link_libraries(PolyhedralSplines legacy_stdio_definitions)
+              endif()
+              if(TARGET PolyhedralSplinesLib)
+                  target_link_libraries(PolyhedralSplinesLib legacy_stdio_definitions)
+              endif()
+          endif()
+          "@
+
+          Set-Content -Path $path -Value ($content + $append) -NoNewline
+          Write-Host "Patched CMakeLists.txt successfully."
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cd source
+          cmake -B build `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DOPENMESH_BUILD_SHARED=OFF
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          cd source
+          cmake --build build --config Release --parallel
+
+      - name: Find the .exe
+        id: find
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem source/build -Recurse -Filter "PolyhedralSplines.exe" | Select-Object -First 1
+          if (-not $exe) { Write-Error ".exe not found"; exit 1 }
+          echo "EXE=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          Write-Host "Built: $($exe.FullName) ($([math]::Round($exe.Length / 1MB, 2)) MB)"
+
+      - name: Upload standalone .exe
         uses: actions/upload-artifact@v4
         with:
-          name: polyspline_cli
-          path: output/polyspline_cli.exe
+          name: PolyhedralSplines_standalone_windows
+          path: ${{ steps.find.outputs.EXE }}
+          retention-days: 90
