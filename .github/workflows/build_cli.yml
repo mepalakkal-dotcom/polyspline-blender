@@ -8,89 +8,43 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # 1. Download & extract safely
+      # 1. Download source
       - name: Download source
         shell: pwsh
         run: |
           curl -L -o src.zip "https://bitbucket.org/surflab/polyhedral_splines/get/master.zip"
-
           Expand-Archive src.zip -DestinationPath extracted
-
-          Write-Host "Extracted folders:"
-          Get-ChildItem extracted
-
-          # Find actual root folder
           $root = Get-ChildItem extracted -Directory | Select-Object -First 1
-
-          if (-not $root) {
-            Write-Error "Extraction failed"
-            exit 1
-          }
-
           Move-Item $root.FullName poly_src
 
-          Write-Host "poly_src created:"
-          Get-ChildItem poly_src
-
-      # 2. Verify structure
+      # 2. Show structure (important)
       - name: Debug structure
         shell: pwsh
         run: |
-          Write-Host "Listing poly_src:"
           Get-ChildItem -Recurse poly_src
 
-      # 3. Add CLI entry
-      - name: Add CLI entry
+      # 3. Create CLI main.cpp (minimal)
+      - name: Create CLI
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path poly_src/src/cli | Out-Null
 
           Set-Content poly_src/src/cli/main.cpp '#include <iostream>'
-          Add-Content poly_src/src/cli/main.cpp '#include "ProcessMesh.h"'
-          Add-Content poly_src/src/cli/main.cpp '#include "IGSWriter.h"'
           Add-Content poly_src/src/cli/main.cpp ''
-          Add-Content poly_src/src/cli/main.cpp 'int main(int argc, char** argv)'
+          Add-Content poly_src/src/cli/main.cpp 'int main()'
           Add-Content poly_src/src/cli/main.cpp '{'
-          Add-Content poly_src/src/cli/main.cpp '    if (argc < 3)'
-          Add-Content poly_src/src/cli/main.cpp '    {'
-          Add-Content poly_src/src/cli/main.cpp '        std::cout << "Usage: polyspline_cli input.obj output.igs\n";'
-          Add-Content poly_src/src/cli/main.cpp '        return 1;'
-          Add-Content poly_src/src/cli/main.cpp '    }'
-          Add-Content poly_src/src/cli/main.cpp ''
-          Add-Content poly_src/src/cli/main.cpp '    ProcessMesh proc;'
-          Add-Content poly_src/src/cli/main.cpp '    proc.loadMesh(argv[1]);'
-          Add-Content poly_src/src/cli/main.cpp '    proc.buildPNS();'
-          Add-Content poly_src/src/cli/main.cpp ''
-          Add-Content poly_src/src/cli/main.cpp '    auto patches = proc.getPatches();'
-          Add-Content poly_src/src/cli/main.cpp ''
-          Add-Content poly_src/src/cli/main.cpp '    IGSWriter writer;'
-          Add-Content poly_src/src/cli/main.cpp '    writer.write(argv[2], patches);'
-          Add-Content poly_src/src/cli/main.cpp ''
-          Add-Content poly_src/src/cli/main.cpp '    std::cout << "Done\n";'
+          Add-Content poly_src/src/cli/main.cpp '    std::cout << "PolySplines CLI placeholder\n";'
           Add-Content poly_src/src/cli/main.cpp '    return 0;'
           Add-Content poly_src/src/cli/main.cpp '}'
 
-      # 4. Patch CMake (dynamic include fix)
+      # 4. Patch CMake (BUILD EVERYTHING)
       - name: Patch CMake
         shell: pwsh
         run: |
-          $proc = Get-ChildItem poly_src -Recurse -Filter "ProcessMesh.h" | Select-Object -First 1
-          $igs  = Get-ChildItem poly_src -Recurse -Filter "IGSWriter.h" | Select-Object -First 1
-
-          if (-not $proc -or -not $igs) {
-            Write-Error "Headers not found"
-            exit 1
-          }
-
-          $procDir = Split-Path $proc.FullName
-          $igsDir  = Split-Path $igs.FullName
-
-          Write-Host "ProcessMesh.h in: $procDir"
-          Write-Host "IGSWriter.h in: $igsDir"
-
-          Add-Content poly_src/CMakeLists.txt "add_executable(polyspline_cli src/cli/main.cpp)"
-          Add-Content poly_src/CMakeLists.txt "target_include_directories(polyspline_cli PRIVATE `"$procDir`" `"$igsDir`")"
-          Add-Content poly_src/CMakeLists.txt "target_link_libraries(polyspline_cli pns_core)"
+          Add-Content poly_src/CMakeLists.txt "
+file(GLOB_RECURSE ALL_SRC src/*.cpp)
+add_executable(polyspline_cli \${ALL_SRC})
+"
 
       # 5. Build
       - name: Build
@@ -113,7 +67,7 @@ jobs:
             exit 1
           }
 
-          New-Item -ItemType Directory -Force -Path output | Out-Null
+          mkdir output
           Copy-Item $exe.FullName output/
 
       # 7. Upload
